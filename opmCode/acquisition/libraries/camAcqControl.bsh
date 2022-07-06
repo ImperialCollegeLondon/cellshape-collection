@@ -1,0 +1,244 @@
+import org.micromanager.data.Datastore;
+//import org.apache.commons.io.FileUtils
+
+Datastore[] acqImagesFromBuffer(datastores, conds, camNames, coordsBuilder, max_dropped, logbuffer){
+	// datastores is array of the initialised datastores, conds is max frames numbers, camNames is
+	// camera names in MM, coordsBuilder object array (see MM docs), max_dropped is max allowed 
+	// dropped frames before raising error, logbuffer is a BufferedWriter(FileWriter)
+	
+	// only works for acquire after each field, moved from the main script 
+	// print("updated tictoc");
+	
+	TicToc=1000;
+	HangExit=0;
+	acquired_success = false;
+	int[] ctrs = new int[datastores.length];
+	java.util.Arrays.fill(ctrs, 0);
+	
+	Tic=System.currentTimeMillis();
+	total_images_missing = 0;  // total missing frames
+	
+	int[] images_missing = new int[datastores.length]; // missing frames per cam
+    java.util.Arrays.fill(images_missing, 0);
+	
+	// array for if cam dropped too many frames
+	boolean[] cam_dropped_too_many_frames = new boolean[datastores.length];
+	java.util.Arrays.fill(cam_dropped_too_many_frames, false);
+	
+	sc.message("Grabbing frames");
+	// while all frames (- max_dropped)
+	while(!acquired_success && HangExit == 0) {
+		Toc=System.currentTimeMillis();
+
+		if ( ( Toc-Tic ) < TicToc ) 
+		{
+			if (mmc.getRemainingImageCount() > 0) {
+				TaggedImage img = mmc.popNextTaggedImage();	
+				camName = img.tags.getString("Camera");
+				// print("cam name = " + camName);
+				int i = 0;
+				while(i<camNames.length){
+					// print(i);
+					if (camName.equals(camNames[i])) {
+						// print("cam found");
+						break;
+					}
+					i++;
+				}
+				if (i == camNames.length){
+					print("Camera not found");
+					throw new MMException("Camera not found");
+				}
+				Image tmp = mm.data().convertTaggedImage(img);
+				coordsBuilder[i] = coordsBuilder[i].p(ctrs[i]);
+				tmp = tmp.copyAtCoords(coordsBuilder[i].build());
+					
+				datastores[i].putImage(tmp);
+				ctrs[i]++;
+				Tic=System.currentTimeMillis();
+			}		
+		} else {
+			sc.message("Reached acq time limit");
+			HangExit=1;
+		}
+		/////////////////////////////////////////////////////
+		// Are all images acquired?
+		total_images_missing = 0;
+		errmsg = "";
+		for(i=0; i<conds.length; i++){
+			total_images_missing += conds[i] - ctrs[i];
+		}
+		if (total_images_missing == 0){
+			acquired_success = true;
+		}
+	}
+	// Idea is that it waits until all expected images are obtained, but if it times out
+	// it allows a max total number of dropped frames (max_dropped)
+	print("Checking for dropped frames");
+	// check for dropped frames
+	for(i=0; i<conds.length; i++){
+		images_missing[i] = conds[i] - ctrs[i];
+		if (logbuffer != null) logbuffer.write("(" + camNames[i] + ") dropped :"
+			+ images_missing[i] + " ");
+		if (logbuffer != null) logbuffer.flush();
+		if (images_missing[i] > 0){  // if there aren't enough frames
+			if (images_missing[i] > max_dropped){ // if the missing frames exceed the max allowed
+				print("(" + camNames[i] + ") Acquisition hanged and exceeded max dropped frames (" + max_dropped + ")");
+				if (logbuffer != null) logbuffer.write(" (ERROR) max: " + max_dropped + "\n");
+				if (logbuffer != null) logbuffer.flush();
+				cam_dropped_too_many_frames[i] = true;
+				throw new MMException("Exceeded max dropped frames");
+			} else {
+				sc.message("WARNING: Acquired with " + total_images_missing + " dropped frames");
+			}
+		}
+	}
+	
+	if (logbuffer != null) logbuffer.write("\n");
+	if (logbuffer != null) logbuffer.flush();
+	
+	// sc.message("ctrs[0]: " + ctrs[0]);
+
+	return datastores;  // not needed? the datastores array is mutated // remove later and test
+}
+
+Datastore[] acqImagesFromBuffer(datastores, conds, camNames, coordsBuilder, max_dropped){
+	acqImagesFromBuffer(datastores, conds, camNames, coordsBuilder, max_dropped, null);
+}
+
+
+// TODO: add logging for file handling, at the moment I don't bother
+// because I have never seen a random error in this
+Datastore createDatastore(cam_name, savedir, overwrite){
+	// just CAN NOT delete the directory in java for some reason
+	// so have to do a terrible alternative
+	Datastore img_ds;
+	fileSaveFolderDir = savedir + "/";
+	// overwrite if retrying for example
+	new File(fileSaveFolderDir).mkdirs();
+	
+	System.gc();
+	
+	try {
+		// data() is datamanager
+		// new File(fileSaveFolderDir).mkdirs();
+		full_dir = fileSaveFolderDir + cam_name + "/";
+		// checks if there is already the dir for the datastore
+		// that is being created, assumes file is there too
+		File dir = new File(full_dir);
+		
+		if (dir.isDirectory()){
+			if (!overwrite){
+				throw new IOException("File already exists, use overwrite=true "+
+				"when calling createDatastore if you want to overwrite");
+			}
+			sc.message("Overwriting previous attempt in " + full_dir);
+			deleteDatastore(cam_name, fileSaveFolderDir, true);  // delete if already exists (for retries)
+		}
+		sc.message("Creating TIFF stack in " + full_dir);
+		img_ds = mm.data().createMultipageTIFFDatastore(full_dir, false, false);
+		
+	} catch (IOException ex) {
+		mmlog = mm.getLogManager();
+		mmlog.logError(ex, "Error creating datastore in" + fileSaveFolderDir + cam_name + "/");
+		sc.message("Error in creating datastore for " + cam_name + "!");
+		throw(ex);
+		// return ex;
+	}
+	sc.message("Successfully created datastores!");
+	return img_ds;
+}
+
+Datastore createDatastore(cam_name, savedir){
+	createDatastore(cam_name, savedir, false);
+}
+
+int deleteDatastore(cam_name, savedir, del_dir_bool){
+	fileSaveFolderDir = savedir + "/";
+	// overwrite if retrying for example
+	System.gc();
+	full_dir = fileSaveFolderDir + cam_name + "/";
+	File dir = new File(full_dir);
+	// sc.message("Attempting to delete");
+	if (dir.isDirectory()){
+		try {
+			file_names = new File(full_dir).list();
+			for(i=0; i<file_names.length; i++){ 
+				sc.message("Deleting " + file_names[i]
+					+ " (" + (i+1) + "/" + file_names.length + ")");
+				File file = new File(full_dir + file_names[i]);
+				if(file.isFile()){
+					file.delete();
+					if (!file.exists()){
+						sc.message("Successfully deleted " + file_names[i]);
+					} else {
+						sc.message("Failed to delete file " + file_names[i]);
+					}
+				}
+			}
+			// now delete dir
+			if (del_dir_bool){
+				if (! dir.delete()){
+					sc.message("Failed to delete directory " + full_dir 
+						+ ", check if all files were deleted first");
+					throw new IOException("Can't delete dir, files still there");
+				}
+			}
+		} catch (IOException ex) {
+			mmlog = mm.getLogManager();
+			mmlog.logError(ex, "Error deleting datastore in" + full_dir);
+			sc.message("Error deleting datastore for " + full_dir + "!");
+			throw(ex);
+			// return ex;
+		}
+		sc.message("Successfully deleted datastores! (" + full_dir + ")");
+	}
+	else {
+		throw new Exception("No directory named " + full_dir); 
+	}
+	return 0;
+}
+
+int deleteDatastore(cam_name, savedir){
+	// delete dir too by default
+	return deleteDatastore(cam_name, savedir, true);
+}
+
+
+
+int closeAndSaveAcq(acq_rfl,cam_rfl,reflect_dir,acq_str,cam_str,straight_dir,run,field,acq_type) {	
+	
+		labviewFileAcqStop(filedir);
+
+		mmc.stopSequenceAcquisition(cam_rfl); //stop in MM
+		mmc.stopSequenceAcquisition(cam_str); //stop in MM
+		mmc.setProperty(cam_rfl, "Triggermode","Internal"); // stop in the camera
+		mmc.setProperty(cam_str, "Triggermode","Internal"); // stop in the camera
+	
+		save_bg = System.currentTimeMillis();	
+
+		if (acq_type == 1) // save_per_field 
+			end_dir = "run_" + index + "/field_" + field + "/";
+		else
+			end_dir = "run_" + index + "/";
+			
+		// acq_rfl has been created first... there must be a better way than chance...
+		gui.getAcquisition(acq_str);  		
+		new File(straight_dir + end_dir).mkdirs();		
+		ij.IJ.run("Image Sequence... ", "format=TIFF name=run_" + index + "_ start=0 digits=5 save=" + straight_dir + end_dir);
+		gui.getAcquisition(acq_str).promptToSave(false);
+		ij.IJ.run("Close"); 
+	
+		gui.getAcquisition(acq_rfl);  // probably unnecessary if you save right after acquisition
+		// name: common stem,  digits: number of digits for the indices, save: name of the first image
+		new File(reflect_dir + end_dir).mkdirs();
+		ij.IJ.run("Image Sequence... ", "format=TIFF name=run_" + index + "_ start=0 digits=5 save=" + reflect_dir + end_dir);
+		gui.getAcquisition(acq_rfl).promptToSave(false); //just so it doesn't ask every time - DEPRECATED
+		ij.IJ.run("Close"); 
+		
+		save_end = System.currentTimeMillis();
+		run_t = Math.max(0,Math.round((save_end - save_bg)/1000)); // seconds
+		sc.message("Saving took " + run_t + "s");	
+
+		return 0;
+}

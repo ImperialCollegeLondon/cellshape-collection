@@ -1,0 +1,154 @@
+import org.micromanager.utils.MMException;
+
+int checkPos( int[] pos, int[] lim) {
+   int n_fields = pos.length;
+	int error = 0;
+	for(i = 0;i< n_fields;i++) {
+		if(pos[i] < lim[0] || pos[i] > lim[1]) {
+			sc.message("Field " + i + " is out of bounds: "  + pos[i]); 
+			error++;
+		}
+	}
+	return error;
+}
+
+int posNum() {
+	PositionList pl = mm.positions().getPositionList();
+	// pl = gui.getPositionList();
+	n = pl.getNumberOfPositions();
+	if( n % 2 == 0) {	
+		n_fields = n / 2;
+		return n_fields;
+	} else {
+       throw new MMException("Odd number of positions in the position list");
+	}
+}
+
+int convertPos(int[] f_pos, int[] x_pos, int[] y_bg, int[] y_end) {
+	sc.message("in convertPos");
+	print("in convertPos");
+	PositionList pl = mm.positions().getPositionList();
+	// pl = gui.getPositionList();
+	n = pl.getNumberOfPositions();
+	n_fields = n / 2;
+	for (i=0; i < n_fields; i++) {
+	    mp = pl.getPosition(2*i);
+	    mp2 = pl.getPosition(2*i+1);
+		x1 = (int) Math.floor(mp.getX()); 
+//		x2 = (int) Math.floor(mp2.getX()); 
+		y1 = (int) Math.floor(mp.getY()); 
+		y2 = (int) Math.floor(mp2.getY()); 
+		f1 = (int) Math.floor(mp.getZ()); 
+//		f2 = (int) Math.floor(mp2.getZ()); 
+//		foc_dist = Math.abs(f1 - f2);
+//		if(x1 == x2) {			
+			x_pos[i] = x1;
+			y_bg[i] = Math.min(y1,y2);
+			y_end[i] = Math.max(y1,y2);
+			f_pos[i] = f1;
+//		} else {
+//         throw new MMException("Differing x values between positions" + mp.getLabel() + " and " + mp2.getLabel());
+//		}	    
+	}
+	return 0; 
+}
+
+int posCtrNum() {
+	PositionList pl = mm.positions().getPositionList();
+	// pl = gui.getPositionList();
+	n = pl.getNumberOfPositions();
+	return n;
+}
+
+int convertCtr(int[] f_pos, int[] x_pos, int[] y_bg, int[] y_end, int bef_length, int aft_length) {
+	sc.message("in convertCtr");
+	print("in convertCtr");
+	PositionList pl = mm.positions().getPositionList();
+	// pl = gui.getPositionList();
+	n = pl.getNumberOfPositions();
+	for (i=0; i < n; i++) {
+	    mp = pl.getPosition(i);
+	    
+		x = (int) Math.floor(mp.getX()); 
+		y = (int) Math.floor(mp.getY()); 
+		f = (int) Math.floor(mp.getZ()); 
+	
+		x_pos[i] = x;
+		y_bg[i] = y - bef_length;//Math.min(y1,y2);
+		y_end[i] = y + aft_length; //Math.max(y1,y2);
+		f_pos[i] = f;
+	}
+	return 0; 
+}
+
+int convertCtrZ(int[] f_bg, int[] f_end, int[] x_pos, int[] y_pos, int bef_length, int aft_length) {
+	PositionList pl = mm.positions().getPositionList();
+	// pl = gui.getPositionList();
+	n = pl.getNumberOfPositions();
+	for (i=0; i < n; i++) {
+	    mp = pl.getPosition(i);
+	    
+		x = (int) Math.floor(mp.getX()); 
+		y = (int) Math.floor(mp.getY()); 
+		f = (int) Math.floor(mp.getZ()); 
+	
+		x_pos[i] = x;
+		f_bg[i] = f - bef_length;//Math.min(y1,y2);
+		f_end[i] = f + aft_length; //Math.max(y1,y2);
+		y_pos[i] = y;
+	}
+	return 0; 
+}
+
+int convertGrid(int[] f_pos,int[] x_pos, int[] y_bg, int[] y_end, int dist_from_ctr, int lateral_offset, int n_power) {
+	PositionList pl = mm.positions().getPositionList();
+	// pl = gui.getPositionList();
+    mp = pl.getPosition(0); 
+	x = (int) Math.floor(mp.getX()); 
+	y = (int) Math.floor(mp.getY()); 
+	f = (int) Math.floor(mp.getZ()); 	
+
+	for (i=0; i < n_power; i++) {
+		for (j=0; j < n_power; j++) {
+			k = i + j* n_power;
+
+					x_pos[k] = x - (i-n_power/2)*lateral_offset;
+					y_bg[k] = y - (j-n_power/2)*lateral_offset -  dist_from_ctr;
+					y_end[k] = y - (j-n_power/2)*lateral_offset +  dist_from_ctr;
+					f_pos[k] = f;
+		}
+	}	
+	return 0; 
+}
+
+int threestripes(int[] f_pos, int[] x_pos, int[] y_bg, int[] y_end, int centre_length, int lateral_offset, int lateral_length) {
+	PositionList pl = mm.positions().getPositionList();
+	// pl = gui.getPositionList();
+	n = pl.getNumberOfPositions();
+	for (i=0; i < n; i++) {
+		index = 3*i;
+	    mp = pl.getPosition(i);
+	    
+		x = (int) Math.floor(mp.getX()); 
+		y = (int) Math.floor(mp.getY()); 
+		f = (int) Math.floor(mp.getZ()); 
+		sc.message("test " + i + " " +lateral_offset + " " +x+ " " + lateral_offset);
+		x_pos[index] = x - lateral_offset;
+		y_bg[index] = y - lateral_length;//Math.min(y1,y2);
+		y_end[index] = y + lateral_length; //Math.max(y1,y2);
+		f_pos[index] = f;
+
+		x_pos[index+1] = x;
+		y_bg[index+1] = y - centre_length;//Math.min(y1,y2);
+		y_end[index+1] = y + centre_length; //Math.max(y1,y2);
+		f_pos[index+1] = f;
+
+		x_pos[index+2] = x + lateral_offset;
+		y_bg[index+2] = y - lateral_length;//Math.min(y1,y2);
+		y_end[index+2] = y + lateral_length; //Math.max(y1,y2);
+		f_pos[index+2] = f;
+	}
+	return 0; 
+}
+
+

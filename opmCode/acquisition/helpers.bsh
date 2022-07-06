@@ -1,0 +1,42 @@
+//sourcedir = "T:/CRUK MDPA/Software/micro-manager scripts/libraries/";
+sourcedir = "C:/Users/OPMuser/Documents/micromanager/mmgr-opm-scripts/libraries/";
+
+source(sourcedir + "convertPos.bsh");
+source(sourcedir + "fileBasedControl.bsh");
+source(sourcedir + "travelControl.bsh");
+source(sourcedir + "camAcqControl.bsh");
+source(sourcedir + "stripedAcq.bsh");
+// source(sourcedir + "retryCommands.bsh");
+
+int cleanup(cam1,cam2,stageName) {
+	// sc.message("Cleanup in correct source file 2");
+	filedir = "E:/acquisition control files/";
+	mmc.setSerialPortCommand("COM1","a","\r");
+	mmc.setSerialPortCommand("COM4","a","\r");
+//	mmc.setSerialPortCommand("COM4", "A MST 0","\r") ;
+//		String ret = mmc.getSerialPortAnswer("COM4", "\r");
+	writeToFile(filedir + "run.txt","0");
+	mmc.setSerialPortCommand("COM1","!trig 0","\r"); 
+	mmc.setProperty(stageName, "SpeedX [mm/s]",10);
+	mmc.setProperty(stageName, "SpeedY [mm/s]",10);
+	mmc.stopSequenceAcquisition(cam1); //stop in MM
+	
+	mmc.setProperty(cam1, "Triggermode","Internal"); // stop in the camera
+	// single cam version sets cam2 str to ""
+	print("cam2 is " + cam2);
+
+	if(! cam2.equals("")){
+		print("multi camera cleanup");
+		print(cam2);
+		// sc.message(cam2);
+		mmc.setProperty(cam2, "Triggermode","Internal"); // stop in the camera
+		mmc.stopSequenceAcquisition(cam2); //stop in MM
+		mmc.setProperty("Core", "Camera","Multi Camera");	
+	}
+	else {
+		mmc.setProperty("Core", "Camera","pco_camera");
+	}
+	
+	System.gc();
+	return 0;
+}

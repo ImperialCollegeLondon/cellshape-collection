@@ -1,0 +1,63 @@
+int writeToFile(file,str) {
+		BufferedWriter out = new BufferedWriter(new FileWriter(file));
+		out.write(str);
+		out.close();
+		return 0;
+}
+
+String readFromFile(file) {
+		BufferedReader in = new BufferedReader(new FileReader(file));
+		str = in.readLine();
+		in.close();
+		return str;
+}
+
+int labviewFileAcqStart(filedir) {
+	writeToFile(filedir + "run.txt","1");
+	labview_ready = "0";
+	// We wait for labview to set the file to "1", meaning it has started the loop
+	while(labview_ready.charAt(0) != '1'){
+		String ret = readFromFile(filedir + "ready.txt");  // newer mmgr needs string declr
+		if (ret == null)
+			labview_ready  = "0";
+		else
+			labview_ready  = ret;
+		Thread.sleep(100);  // 10 Hz polling rate
+	}
+return 0;
+}
+
+// filter wheel implementation
+int labviewFileAcqStart(filedir, las_channel, fw_position) {
+	// definition for filter wheel implementation
+	writeToFile(filedir + "run.txt","1");
+	writeToFile(filedir + "fw_pos.txt", "" + fw_position);
+	writeToFile(filedir + "las_channel.txt", "" + las_channel);
+	labview_ready = "0";
+	// We wait for labview to set the file to "1", meaning it has started the loop
+	while(labview_ready.charAt(0) != '1'){
+		// ready is written by labVIEW
+		String ret = readFromFile(filedir + "ready.txt");
+		if (ret == null)
+			labview_ready  = "0";
+		else
+			labview_ready  = ret;
+		Thread.sleep(100);  // 10 Hz polling rate
+	}
+return 0;
+}
+
+int labviewFileAcqStop(filedir) {
+	writeToFile(filedir + "run.txt","0");
+   labview_ready = "1";
+	// We wait for labview to set the file to "0", meaning it has stopped the loop
+	while(labview_ready.charAt(0) != '0'){
+		String ret = readFromFile(filedir + "ready.txt");
+		if (ret == null)
+			labview_ready  = "1";
+		else
+			labview_ready  = ret;
+		Thread.sleep(100);  // 10 Hz polling rate
+	}
+return 0;
+}

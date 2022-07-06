@@ -1,0 +1,6 @@
+function [volume] = loadSingleCellVolume(folder, listCells, iCell, iRun, iChannel)
+    listImages = dir([folder '\' listCells{iCell}...
+        '\run_' num2str(iRun, '%04d') '*' ...
+        '_channel_' num2str(iChannel, '%04d') '.tif']);
+    volume = readTiffStack(listImages);
+end

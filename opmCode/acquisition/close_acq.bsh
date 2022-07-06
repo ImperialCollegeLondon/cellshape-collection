@@ -1,0 +1,3 @@
+source("C:/Users/OPMuser/Documents/micromanager/mmgr-opm-scripts/helpers.bsh");
+
+cleanup("pco_camera","pco_camera_bis",mmc.getXYStageDevice());

@@ -1,0 +1,585 @@
+int setUpStage(port,trg_dist,scan_speed,logbuffer) {
+	// TODO snake scan with trigger mode 1?
+
+	mmc.setSerialPortCommand("COM1","!trig 1","\r"); 
+
+	mmc.setProperty(stageName, "SpeedX [mm/s]",scan_speed);
+	mmc.setProperty(stageName, "SpeedY [mm/s]",scan_speed);
+	
+	speedY = Double.parseDouble(mmc.getProperty(stageName, "SpeedY [mm/s]"));
+	speedX = Double.parseDouble(mmc.getProperty(stageName, "SpeedX [mm/s]"));
+		
+	rtnMsg = "";
+	// 1: check if triggering
+	mmc.setSerialPortCommand(port,"?trig","\r");
+	trigger = mmc.getSerialPortAnswer(port, "\r");
+	if ( !trigger.equals("1") ){
+		rtnMsg += "ERROR: Triggering is not on. ";
+	}
+	if (logbuffer != null) logbuffer.write("trigger: " + trigger + " ");
+	
+	// 2: check scan speed
+	if ( Math.abs(speedY - scan_speed) > 1e-3 ){
+		rtnMsg += "Scan speed not set correctly when setting up stage (" + speedY + " not " + scan_speed + "). ";
+	}
+	
+	if (!rtnMsg.equals("")){
+		throw new MMException("In setUpStage: " + rtnMsg);
+	}
+	if (logbuffer != null) logbuffer.flush();
+	// throw new Exception("Random test error");
+	return 0;
+}
+
+int setUpStageRetry(port,trg_dist,scan_speed,max_tries,logbuffer){
+	tries = 1;
+	success = false;
+	while(!success){
+		try{
+			setUpStage(port,trg_dist,scan_speed,logbuffer);
+			success = true;
+		} catch (Exception e){
+			if (logbuffer != null) logbuffer.write("# failed setUpStage with " 
+				+ e.toString() + ", waiting " + (10*tries) + " seconds # \n");
+			if (logbuffer != null) logbuffer.flush();
+			if (tries >= max_tries){
+				throw new MMException("Failed setUpStage after " + tries 
+					+ " attempts with: " + e.toString()); 
+			}
+		}
+		tries++;
+		waittime = 10000*tries;
+		if (waittime > 60000) waittime = 60000;  // max wait time
+		if (tries < max_tries && !success) Thread.sleep(waittime); // increase wait time with number of tries
+		
+	}
+	return 0;
+}
+
+// faster functions (hopefully)
+/*int setTriggerRetry(port,trig,max_tries){
+	success = false;
+	trigstr = trig + "";
+	tries = 1;
+	while(!success){
+		try{
+			mmc.setSerialPortCommand("COM1","!trig 1","\r"); 
+			mmc.setSerialPortCommand(port,"?trig","\r");
+			trigger = mmc.getSerialPortAnswer(port, "\r");
+			if ( !trigger.equals(trigstr) ){
+				throw new MMException("Trigger not set, attempted to set to " + trigstr);
+			}
+		tries++;
+		waittime = 10000*tries;
+		if (waittime > 60000) waittime = 60000;  // max wait time
+}
+
+int setSpeedRetry() */
+
+int initialiseStage(port, trg_dist, timeout, logbuffer){
+	trigger_dist_dub = -1.0;  // -1 so always wrong at first
+	start = System.currentTimeMillis();
+	time = 0.0;
+	// set and check trigger distance
+	trigger_dist_serial = "";
+	while( Math.abs(trigger_dist_dub - trg_dist) > 1e-4 && time < timeout){
+		mmc.setSerialPortCommand(port,"!dim 1 1","\r"); // dimensions in microns
+		mmc.setSerialPortCommand(port,"!trigd " + trg_dist,"\r");
+		Thread.sleep(200);
+		mmc.setSerialPortCommand(port,"?trigd","\r");
+		trigger_dist_serial = mmc.getSerialPortAnswer(port, "\r");
+		trigger_dist_dub = Double.parseDouble(trigger_dist_serial);
+		time = System.currentTimeMillis() - start;
+	}
+	if (time >= timeout){
+		throw new MMException("ERROR timed out trying to set trigger distance");
+		if (logbuffer != null) logbuffer.write(
+			"## ERROR timed out trying to set trigger distance correctly ##");
+		if (logbuffer != null) logbuffer.flush();
+	}
+	
+	if (logbuffer != null) logbuffer.write("trigger distance: " + trigger_dist_serial 
+		+ " (" + trg_dist + ") ");
+	if (logbuffer != null) logbuffer.flush();
+	
+	// set trigger mode, axis, time
+	success = false;
+	time = 0.0;
+	start = System.currentTimeMillis();
+	
+	while ( !success && time < timeout ){
+		mmc.setSerialPortCommand("COM1","!trigm 1","\r");
+		mmc.setSerialPortCommand("COM1","!triga y","\r");
+		mmc.setSerialPortCommand("COM1","!trigs 500","\r"); // size of the trigger, microsecond
+		Thread.sleep(200);
+		mmc.setSerialPortCommand("COM1","?trigm","\r");		
+		trigger_mode = mmc.getSerialPortAnswer(port, "\r");
+		trigger_mode_int = Integer.parseInt(trigger_mode);
+		mmc.setSerialPortCommand("COM1","?triga","\r");		
+		trigger_axis = mmc.getSerialPortAnswer(port, "\r");
+		mmc.setSerialPortCommand("COM1","?trigs","\r");		
+		trigger_time = mmc.getSerialPortAnswer(port, "\r");
+		trigger_time_int = Integer.parseInt(trigger_time);
+		
+		if (logbuffer != null) logbuffer.write("trigger mode: " + trigger_mode 
+			+ " (1)" + ", trigger axis: " + trigger_axis + " (y)" 
+			+ ", trigger time: " + trigger_time + " (500)" );
+		if (logbuffer != null) logbuffer.flush();	
+		
+		success = true;
+		if (trigger_mode_int != 1) success = false;
+		if (!trigger_axis.equals("y")) success = false;
+		// rounds to nearest 40
+		if (Math.abs(trigger_time_int - 500) > 20) success = false;
+		
+		time = System.currentTimeMillis() - start;
+	}
+	if (time >= timeout){
+		if (logbuffer != null) logbuffer.write(
+			"## ERROR timed out trying to set trigger mode/axis/time correctly (" 
+				+ timeout + "ms) ##");
+		if (logbuffer != null) logbuffer.flush();
+		throw new MMException("ERROR timed out trying to set trigger mode/axis/time");
+	}
+	return 0;
+}
+
+int initialiseStage(port, trg_dist, logbuffer){
+	// default 10s timeout
+	return initialiseStage(port, trg_dist, 10000, logbuffer);
+}
+
+int initialiseStage(port, trg_dist){
+	// default 10s timeout
+	return initialiseStage(port, trg_dist, 10000, null);
+}
+
+int setUpStageRetry(port,trg_dist,scan_speed,max_tries){
+	// version without logging
+	return setUpStageRetry(port,trg_dist,scan_speed,max_tries,null);
+}
+
+int setUpFocus() {  // remove?
+	print("Check focus was set up");
+	return 0;
+}
+
+int waitForZnew(timeout) {
+	// Isn't working properly? getting a move signal too quickly
+	// Fixed by !statusaxis -> ?statusaxis z (was giving the 3 axes and missing "M")
+	// print("in WaitForZnew");
+	start_time = System.currentTimeMillis();
+	time = 0;
+	
+	mmc.setSerialPortCommand("COM4","?statusaxis z","\r"); 
+	status = mmc.getSerialPortAnswer("COM4","\r"); 
+
+	while(status.charAt(0) == 'M' && time < timeout) {
+		time = System.currentTimeMillis() - start_time;
+		// print("status:" + status);
+		mmc.setSerialPortCommand("COM4","?statusaxis z","\r"); 
+		Thread.sleep(50);  // 10 Hz polling rate
+		status = mmc.getSerialPortAnswer("COM4","\r");
+	}
+	time = System.currentTimeMillis() - start_time;
+	if (time > timeout){
+		throw new MMException("Timed out moving Z (timeout=" + timeout + "ms)");
+	}
+	// print("Z move finished signal recieved in " + time + "ms");
+	return 0;
+}
+
+int waitForZnew() {
+	waitForZnew(10000);
+}
+
+
+int setZPositionQuick(zStageName, z, blocking){
+	timeout = 10000;
+	time0 = System.currentTimeMillis();
+	time = 0;
+	moved = false;
+	ret = 1;
+	while(!moved && time < timeout){
+		try {
+			mmc.setPosition(zStageName, z);
+			if (blocking) waitForZnew();
+			ret = 0;
+			moved = true;
+		} catch(Exception ex) {
+			moved = false;
+			sc.message("z failed to move, retrying");
+		}
+		time = System.currentTimeMillis() - time0;
+	}
+	return ret;
+}
+
+int setZPositionQuick(zStageName, z){
+	return setZPositionQuick(zStageName, z, true);
+}
+	
+int setZPositionNonBlocking(zStageName, z){
+	return setZPositionQuick(zStageName, z, false);
+}
+
+int waitForStageZ(stageName, aim_z_pos, travel_speed, fudge) {
+	// fudge is an overhead time in ms supplied by user
+	cur_z_pos = mmc.getPosition(stageName);
+	z_dist = Math.abs(cur_z_pos - aim_z_pos);
+	z_t = z_dist / travel_speed;
+	d_t = (int) Math.ceil(z_t);
+	d_t += fudge;
+	Thread.sleep(d_t);
+	return d_t;
+}
+
+int waitForStageZ(stageName, aim_z_pos, travel_speed){
+	waitForStageZ(stageName, aim_z_pos, travel_speed, 0);
+}
+	
+
+int waitForXY() {
+	mmc.setSerialPortCommand("COM1","?statusaxis","\r"); 
+	status = mmc.getSerialPortAnswer("COM1","\r"); 
+	while(status.charAt(0) == 'M' || status.charAt(1) == 'M') {
+		mmc.setSerialPortCommand("COM1","!statusaxis","\r"); 
+		status = mmc.getSerialPortAnswer("COM1","\r"); 
+		Thread.sleep(100);  // 10 Hz polling rate
+	}	
+	return 0;
+}
+
+int waitForStage(stageName,aim_x_pos,aim_y_pos,travel_speed) {
+	cur_x_pos = mmc.getXPosition(stageName);
+	cur_y_pos = mmc.getYPosition(stageName);
+	x_dist = Math.abs(cur_x_pos - aim_x_pos);
+	y_dist = Math.abs(cur_y_pos - aim_y_pos);
+	x_t = x_dist / travel_speed;
+	y_t = y_dist / travel_speed;
+	d_t = (int) Math.ceil(Math.max(x_t,y_t));
+	Thread.sleep(d_t);
+	return d_t;
+}
+
+int coreTravelNoWait(cur_z_pos,aim_z_pos,aim_x_pos,aim_y_pos,travel_speed,stageName,zStageName) {
+	if(cur_z_pos < aim_z_pos)	{ 
+		mmc.setPosition(zStageName,aim_z_pos);
+		mmc.setXYPosition(stageName,aim_x_pos,aim_y_pos);
+	}	else 	{
+		mmc.setXYPosition(stageName,aim_x_pos,aim_y_pos);
+		mmc.setPosition(zStageName,aim_z_pos);
+	}	
+	// 2022/05/13 LRB waitForStage not needed because waitForXY and waitForZnew
+	// waitForStage(stageName,aim_x_pos,aim_y_pos,travel_speed); 
+	waitForXY();
+	waitForZnew();
+	return 0;
+}
+
+int coreTravelWait(cur_z_pos,aim_z_pos,aim_x_pos,aim_y_pos,travel_speed,stageName,zStageName) {
+	if(cur_z_pos < aim_z_pos)	{ 
+		mmc.setPosition(zStageName,aim_z_pos);
+		waitForZnew();
+		
+		mmc.setXYPosition(stageName,aim_x_pos,aim_y_pos);
+		waitForStage(stageName,aim_x_pos,aim_y_pos,travel_speed);
+		waitForXY();
+	}	else 	{
+		mmc.setXYPosition(stageName,aim_x_pos,aim_y_pos);
+		waitForStage(stageName,aim_x_pos,aim_y_pos,travel_speed);
+		waitForXY();
+		
+		mmc.setPosition(zStageName,aim_z_pos);
+		waitForZnew();
+	}	
+	return 0;
+}
+
+int generalTravel(aim_z_pos,aim_x_pos,aim_y_pos,travel_speed,stageName,zStageName,wait) {
+	
+	// sc.message("current time");
+	travel_begin= System.currentTimeMillis();
+	// sc.message("Setting speed");
+	mmc.setProperty(stageName, "SpeedX [mm/s]",travel_speed);
+	mmc.setProperty(stageName, "SpeedY [mm/s]",travel_speed);
+	
+	speedY = Double.parseDouble(mmc.getProperty(stageName, "SpeedY [mm/s]"));
+	speedX = Double.parseDouble(mmc.getProperty(stageName, "SpeedX [mm/s]"));
+	
+	if (Math.abs(speedY - travel_speed) > 1e-3 || Math.abs(speedY - travel_speed) > 1e-3){
+		throw new MMException("Travel speed not set correctly");
+	}
+	
+	// sc.message("Getting positions");
+	cur_z_pos = mmc.getPosition(zStageName);	
+	if (wait == 0){
+		coreTravelNoWait(cur_z_pos,aim_z_pos,aim_x_pos,aim_y_pos,travel_speed,stageName,zStageName);
+	}
+	else {
+		 coreTravelWait(cur_z_pos,aim_z_pos,aim_x_pos,aim_y_pos,travel_speed,stageName,zStageName);
+	}
+	// Thread.sleep(1000); // REMOVED lrb 12/05/22, explicit waiting happens in coreTravelWait
+	cur_x_pos = mmc.getXPosition(stageName);
+	cur_y_pos = mmc.getYPosition(stageName);
+	cur_z_pos = mmc.getPosition(zStageName);
+	// sc.message("Get positions");
+	// sc.message("Move error result: "+ (cur_z_pos - aim_z_pos) + " " + (cur_x_pos - aim_x_pos) + " " + (cur_y_pos - aim_y_pos));
+	travel_end = System.currentTimeMillis();
+	travel_t = Math.max(0,Math.round((travel_end - travel_begin))); // ms
+	sc.message("Travel took " + travel_t + "ms");			
+	return 0;
+}
+
+int travelToPosition(aim_z_pos,aim_x_pos,aim_y_pos,travel_speed,stageName,zStageName) {
+	int wait = 1;
+	// Z ISN'T WAITED FOR? - FIX THIS
+	generalTravel(aim_z_pos,aim_x_pos,aim_y_pos,travel_speed,stageName,zStageName,wait);
+	return 0;
+}
+
+int travelToPositionRetry(aim_z_pos,aim_x_pos,aim_y_pos,travel_speed,stageName,zStageName,timeout) {
+	// version without logging
+	return travelToPositionRetry(aim_z_pos,aim_x_pos,aim_y_pos,travel_speed,stageName,zStageName,timeout,null);
+}
+
+int travelToPositionRetry(aim_z_pos,aim_x_pos,aim_y_pos,travel_speed,stageName,zStageName,timeout,logbuffer) {
+	// Mainly used and highest level command called by the main script to move between positions
+	// makes sure arrives at the position when moving between positions in the position list
+	int wait = 1;
+	double start_movetime = System.currentTimeMillis();
+	double movetime = 0.0;
+	moved = false;
+	// retry until the timeout is exceeded - Z ISN'T WAITED FOR - FIX THIS
+	while(!moved && movetime < timeout){
+		try {
+			// sc.message("(travelToPositionRetry) zStageName" + zStageName);
+			travelToPosition(aim_z_pos,aim_x_pos,aim_y_pos,travel_speed,stageName,zStageName);
+			checkXYZ(stageName, zStageName, aim_x_pos, aim_y_pos, aim_z_pos, logbuffer);
+			moved = true;
+		}
+		catch(Exception e2) {
+			moved = false;
+			sc.message("(travelToPositionRetry) FAILED TO MOVE WITH ERROR: " + e2.toString());
+			if (logbuffer != null) logbuffer.write(" ## (travelToPositionRetry) FAILED TO MOVE WITH ERROR: " + e2.toString() + "## ");
+			if (logbuffer != null) logbuffer.flush();
+			if (movetime > timeout) throw e2;
+		}
+		movetime = (System.currentTimeMillis() - start_movetime)/1000.0;
+	}
+	
+	return 0;
+}
+
+int travelToPositionNoWait(aim_z_pos,aim_x_pos,aim_y_pos,travel_speed,stageName,zStageName) {
+	int wait = 0;
+	generalTravel(aim_z_pos,aim_x_pos,aim_y_pos,travel_speed,stageName,zStageName,wait);
+	return 0;
+}
+
+int setXYPositionForAcqRetry(stageName, x_pos, y_pos, retries){
+	// version without logging (not actually used right now)
+	return setXYPositionForAcqRetry(stageName, x_pos, y_pos, retries, null);
+}
+
+int setXYPositionForAcqRetry(stageName, x_pos, y_pos, tries, logbuffer){
+	// Robust version of just setting XY position, checks if started moving
+	// but also is as fast as possible if it succeeds
+	// only handles fatal communication errors to the stage, not whether
+	// it makes the full scan distance (use checkXYZ) after acq.
+	double yStartPos = mmc.getYPosition(stageName);
+	double start_movetime = System.currentTimeMillis();
+	double movetime = 0.0;
+	moved = true;
+	n_try = 1;
+	do{
+		try {
+			// if it failed the first time go back to beginning
+			// this only handles fatal communication errors to stage
+			if (moved == false){
+				if (logbuffer != null) logbuffer.write("## resetting scan start position... ##");
+				if (logbuffer != null) logbuffer.flush();  // if dummy stringwriter supplied
+				mmc.setSerialPortCommand("COM1","!trig 0","\r");
+				Thread.sleep(100);  // 10Hz polling time?
+				mmc.setXYPosition(stageName, x_pos, yStartPos);
+				Thread.sleep(5000);  // wait 5s before checking position has reset
+				// 120s to return to original position, this should probably not be hard-coded
+				checkXYWait(stageName, x_pos, y_pos, logbuffer, 120);
+				Thread.sleep(100);
+				mmc.setSerialPortCommand("COM1","!trig 1","\r");
+				Thread.sleep(100);
+				// throw new Exception("test exception");
+			}
+			mmc.setXYPosition(stageName, x_pos, y_pos);
+			// throw new Exception("test exception");
+			moved = true;
+			if (logbuffer != null) logbuffer.write(" ## scan start success ## ");
+		    if (logbuffer != null) logbuffer.flush();
+		}
+		catch(Exception e) {  // if exception raised set moved to false
+			moved = false;
+			if (logbuffer != null) logbuffer.write(" ## Failed to start scan ## ");
+			if (logbuffer != null) logbuffer.flush();
+			if (n_try >= tries){
+				throw e;
+			}
+			if (logbuffer != null) logbuffer.write(", retrying " + "(" + (n_try + 1) + "/" + tries + ") ## \n");
+			if (logbuffer != null) logbuffer.flush();
+			// in case move was semi-successful and we're not at the beginning, clear buffer
+			mmc.clearCircularBuffer();
+			Thread.sleep(100);
+			
+			sc.message("Failed to start scan, retrying " + "(" + (n_try + 1) + "/" + tries +")");
+		}
+		// if (logbuffer != null) logbuffer.write("\n");
+		n_try = n_try + 1;
+		movetime = (System.currentTimeMillis() - start_movetime)/1000.0;
+	} while(!moved && n_try <= tries);
+	return 0;
+}
+
+int[] checkXYZ(stageName, zStageName, x_target, y_target, z_target){
+	// checkXYZ without logging
+	return checkXYZ(stageName, zStageName, x_target, y_target, z_target, null);
+}
+
+int[] checkXYZ(stageName, zStageName, x_target, y_target, z_target, logbuffer){
+	// Raises MMException if the position is not correct, make sure to handle it correctly
+	//
+	// check X Y and Z positions. Is used automatically when going between positions
+	// i.e. with traveToPosition commands, needs to be run manually for setXYPosition commands
+	// which set the stage moving for acq. The image acq would most likely hang anyway though.
+	rtnMsg = "";
+	
+	ypos = mmc.getYPosition(stageName);  // y position reported by stage
+	xpos = mmc.getXPosition(stageName);  // x position reported by stage
+	zpos = 0.0;
+	
+	move_err_y = Math.abs(y_target - ypos);
+	move_err_x = Math.abs(x_target - xpos);
+	move_err_z = 0.0;
+	
+	if (!zStageName.equals("None")){
+		// sc.message("None zstage");
+		zpos = mmc.getPosition(zStageName);  // x position reported by stage
+		move_err_z = Math.abs(z_target - zpos);
+	}
+	
+	if (move_err_x > 0.1){
+		rtnMsg += "ERROR: X incorrect: (" + xpos + " not " + x_target + "). ";
+	}
+	if (move_err_y > 0.1){
+		rtnMsg += "ERROR: Y incorrect: (" + ypos + " not " + y_target + "). ";
+	}
+	if (move_err_z > 0.1){
+		rtnMsg += "ERROR: Z incorrect: (" + zpos + " not " + z_target + "). ";
+	}
+		
+	if (logbuffer != null) logbuffer.write("xpos: " + xpos + " (" + x_target + ") ypos: " + ypos + " (" + y_target + ") zpos: " + zpos + " (" + z_target + ") , ");
+	if (!rtnMsg.equals("")){
+		// sc.message(rtnMsg);
+		throw new MMException(rtnMsg);
+	}
+	
+	return new int[]{xpos, ypos, zpos};
+}
+
+int checkXYZWait(stageName, zStageName, x_target, y_target, z_target, logbuffer, timeout){
+	// checks the XYZ are correct and waits for time <timeout> until failing 
+	// timeout is in seconds
+	
+	double start = System.currentTimeMillis();
+	time = 0.0;
+	success = false;
+	// retry until the timeout is exceeded
+	while(!success && time < timeout){
+		try {
+			checkXYZ(stageName, zStageName, x_target, y_target, z_target, logbuffer);
+			success = true;
+		} catch(Exception e) {
+			if (time > timeout){
+				throw e;
+			}
+			if (logbuffer != null) logbuffer.write(" ## Waiting 10 seconds in checkXYZWait... ## ");
+			if (logbuffer != null) logbuffer.flush();
+			Thread.sleep(10000);
+		}
+		// if (logbuffer != null) logbuffer.write("\n");
+		// logbuffer.flush();
+		time = (System.currentTimeMillis() - start)/1000.0;
+	}
+	return 0;
+}
+
+int checkXYWait(stageName, x_target, y_target, logbuffer, timeout){
+	// checks the XYZ are correct and waits for time <timeout> until failing 
+	// timeout is in seconds
+	double start = System.currentTimeMillis();
+	time = 0.0;
+	success = false;
+	zStageName_xy = "None";
+	z_target = 0;
+	// retry until the timeout is exceeded
+	while(!success && time < timeout){
+		try {
+			checkXYZ(stageName, zStageName_xy, x_target, y_target, z_target, logbuffer);
+			// throw new Exception("test exception checkxyzz");
+			success = true;
+		} catch(Exception e) {
+			e_out = e;
+			if (time > timeout){
+				throw e;
+			}
+			if (logbuffer != null) logbuffer.write(" ## Waiting 10 seconds in checkXYWait... ## ");
+			if (logbuffer != null) logbuffer.flush();
+			Thread.sleep(10000);
+		}
+		// if (logbuffer != null) logbuffer.write("\n");
+		// logbuffer.flush();
+		time = (System.currentTimeMillis() - start)/1000.0;
+	}
+	return 0;
+}
+		
+
+
+int checkStageErrors(stageName, port, trig_dist, scan_speed, logbuffer){  // NOT USED
+	rtnMsg = "";
+
+	// 1: check if triggering
+	mmc.setSerialPortCommand(port,"?trig","\r");
+	trigger = mmc.getSerialPortAnswer(port, "\r");
+	if ( !trigger.equals("1") ){
+		rtnMsg += "ERROR: Triggering is not on. ";
+	}
+	if (logbuffer != null) logbuffer.write("trigger: " + trigger + " ");
+	
+	// 2: check trigger distance
+	mmc.setSerialPortCommand(port,"?trigd","\r");
+	trigger_dist_serial = mmc.getSerialPortAnswer(port, "\r");
+	trigger_dist_dub = Double.parseDouble(trigger_dist_serial);
+	if ( Math.abs(trigger_dist_dub - trig_dist) > 1e-4 ){
+		rtnMsg += "ERROR: Trigger distance incorrect (" + trigger_dist_serial + " not " + trig_dist + "). ";
+	}
+	if (logbuffer != null) logbuffer.write("trigger distance: " + trigger_dist_serial + " (" + trig_dist + ") ");
+	
+	// 3: check scan speed
+	// mmc.setSerialPortCommand(port,"?speed y","\r");
+	// scan_speed_serial = mmc.getSerialPortAnswer(port, "\r");
+	scan_speed_serial = mmc.getProperty(stageName, "SpeedX [mm/s]");
+	if (logbuffer != null) logbuffer.write("scan speed: " + scan_speed_serial + " (" + scan_speed + ")");
+	scan_speed_serial_dub = Double.parseDouble(scan_speed_serial);
+
+	if ( Math.abs(scan_speed_serial_dub - scan_speed) > 1e-4 ){
+		rtnMsg += "ERROR: Scan speed incorrect (" + scan_speed_serial + " not " + scan_speed + "). ";
+	}
+	
+	if (logbuffer != null) logbuffer.flush();
+	
+	if (!rtnMsg.equals("")){
+		throw new MMException(rtnMsg);
+	}
+
+
+	return 0;
+}
